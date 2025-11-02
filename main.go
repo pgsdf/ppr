@@ -1,4 +1,4 @@
-// ppr: PGSD pkg repair — a Bubble Tea TUI for FreeBSD/GhostBSD pkg catalog repair
+// ppr: PGSD pkg repair — a TUI for FreeBSD/GhostBSD pkg catalog repair
 // Name: ppr (PGSD pkg repair)
 // Written for PGSD (Pacific Grove Software Distribution)
 // Copyright (c) 2025 Pacific Grove Software Distribution Foundation
@@ -31,14 +31,15 @@ type Stage string
 type Status string
 
 const (
-	StageRepoNet      Stage = "repo_network_check"
-	StageDetectEnv    Stage = "detect_env"
-	StageClearCache   Stage = "clear_repo_cache"
-	StagePkgUpdate    Stage = "pkg_update_force"
-	StagePkgCheckDA   Stage = "pkg_check_da"
+	StageDNSCheck    Stage = "dns_check"
+	StageRepoNet     Stage = "repo_network_check"
+	StageDetectEnv   Stage = "detect_env"
+	StageClearCache  Stage = "clear_repo_cache"
+	StagePkgUpdate   Stage = "pkg_update_force"
+	StagePkgCheckDA  Stage = "pkg_check_da"
 	StagePkgRecompute Stage = "pkg_check_recompute"
-	StageMoveLocalDB  Stage = "move_local_sqlite"
-	StageComplete     Stage = "complete"
+	StageMoveLocalDB Stage = "move_local_sqlite"
+	StageComplete    Stage = "complete"
 
 	StatusOK    Status = "ok"
 	StatusSkip  Status = "skip"
@@ -118,6 +119,7 @@ func initialModel(cfg Config) model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#003366"))
 	order := []Stage{
+		StageDNSCheck,
 		StageRepoNet,
 		StageDetectEnv,
 		StageClearCache,
@@ -234,6 +236,8 @@ func statusIcon(s Status) string {
 
 func humanStage(s Stage) string {
 	switch s {
+	case StageDNSCheck:
+		return "Check DNS configuration"
 	case StageRepoNet:
 		return "Check repository network"
 	case StageDetectEnv:
@@ -260,6 +264,17 @@ func runStage(cfg Config, st Stage) tea.Cmd {
 		ev := Event{Time: time.Now().UTC().Format(time.RFC3339), Stage: st}
 
 		switch st {
+		case StageDNSCheck:
+			msg, detail, ok := checkDNS(ctx)
+			if ok {
+				ev.Status = StatusOK
+			} else {
+				ev.Status = StatusWarn
+			}
+			ev.Message = msg
+			ev.Detail = detail
+			return eventMsg(ev)
+
 		case StageRepoNet:
 			msg, detail, ok := checkRepoNetwork(ctx)
 			if ok {
@@ -365,6 +380,86 @@ func runAndReport(ctx context.Context, ev Event, name string, args []string, okM
 	ev.Message = okMsg
 	ev.Detail = tail(out, 200)
 	return eventMsg(ev)
+}
+
+// --- DNS check ---
+
+func checkDNS(ctx context.Context) (string, string, bool) {
+	// Read resolv.conf
+	resolvPath := "/etc/resolv.conf"
+	data, err := os.ReadFile(resolvPath)
+	var nameservers []string
+	if err == nil {
+		sc := bufio.NewScanner(strings.NewReader(string(data)))
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if strings.HasPrefix(line, "nameserver") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					nameservers = append(nameservers, fields[1])
+				}
+			}
+		}
+	}
+
+	// Derive targets from pkg -vv (repo URLs → hosts)
+	abi, _ := runCmdCapture(ctx, "pkg", []string{"config", "ABI"})
+	vv, errVV := runCmdCapture(ctx, "pkg", []string{"-vv"})
+	var hosts []string
+	seen := map[string]bool{}
+	if errVV == nil {
+		for _, u := range parseRepoURLs(vv, strings.TrimSpace(abi)) {
+			if pu, err := url.Parse(u); err == nil && pu.Host != "" {
+				h := pu.Host
+				// strip port if present
+				if i := strings.Index(h, ":"); i >= 0 {
+					h = h[:i]
+				}
+				if !seen[h] {
+					seen[h] = true
+					hosts = append(hosts, h)
+				}
+			}
+		}
+	}
+	// Add common defaults if none parsed
+	if len(hosts) == 0 {
+		for _, h := range []string{"pkg.freebsd.org", "pkg.ghostbsd.org"} {
+			if !seen[h] {
+				seen[h] = true
+				hosts = append(hosts, h)
+			}
+		}
+	}
+
+	var lines []string
+	if len(nameservers) > 0 {
+		lines = append(lines, "Resolvers:")
+		for _, ns := range nameservers {
+			lines = append(lines, "  - "+ns)
+		}
+	} else {
+		lines = append(lines, "Resolvers: (none detected in /etc/resolv.conf)")
+	}
+
+	okAll := true
+	lines = append(lines, "Lookups:")
+	for _, h := range hosts {
+		start := time.Now()
+		addrs, err := net.LookupHost(h)
+		elapsed := time.Since(start)
+		if err != nil {
+			okAll = false
+			lines = append(lines, fmt.Sprintf("  [x] %s  (lookup failed: %v)", h, err))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  [✓] %s  (%d result(s), %s)", h, len(addrs), elapsed.Truncate(time.Millisecond)))
+	}
+
+	if okAll {
+		return "DNS resolution working", strings.Join(lines, "\n"), true
+	}
+	return "Some DNS lookups failed", strings.Join(lines, "\n"), false
 }
 
 // --- Repository Network Check ---
@@ -537,4 +632,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-
