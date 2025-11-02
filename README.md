@@ -73,7 +73,9 @@ sudo ./ppr --compact --report-json /var/log/ppr-$(date +%Y%m%d).json
 1. **Check Repository Network**
 
    Verifies all repositories are reachable and their metadata endpoints respond.
-
+   
+   Verifies DNS resolution for repository hosts
+   
 2. **Detect Environment**
 
    Confirms execution as root and checks system compatibility.
