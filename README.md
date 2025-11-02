@@ -71,24 +71,31 @@ sudo ./ppr --compact --report-json /var/log/ppr-$(date +%Y%m%d).json
 ## Execution Stages
 
 1. **Check Repository Network**
+
    Verifies all repositories are reachable and their metadata endpoints respond.
 
 2. **Detect Environment**
+
    Confirms execution as root and checks system compatibility.
 
 3. **Clear Repository Cache**
+
    Removes outdated or corrupted `repo-*.sqlite*` files.
 
 4. **Force Package Update**
+
    Refreshes repository data with `pkg update -f`.
 
 5. **Verify Package Database**
+
    Performs integrity checks with `pkg check -da`.
 
 6. **Recompute Package Metadata**
+
    Rebuilds dependency and manifest data with `pkg check -r -a`.
 
 7. **Last Resort Recovery**
+
    Moves `local.sqlite` aside if needed.
    If none exists, ppr reports:
    *“No local.sqlite found — package database is already in a clean state.”*
