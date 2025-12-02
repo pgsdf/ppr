@@ -1,6 +1,6 @@
 # ppr – PGSD pkg repair
 
-**ppr** is a terminal utility that repairs and verifies GhostBSD and PGSD package databases.  
+**ppr** is a terminal utility that repairs and verifies FreeBSD and GhostBSD package databases.  
 It provides clear, progressive feedback and real-time status updates.
 
 - **Name:** PGSD pkg repair (ppr)  
